@@ -97,7 +97,7 @@ class RaindropCanvas(Canvas):
         global minCumulitiveFactor
         minCumulitiveFactor = 3
         
-        baseVector = [(random.random()-.5)/xNumOfDivs, random.random()-0.5/yNumOfDivs]
+        baseVector = [(random.random()-.5)/xNumOfDivs, (random.random()-.5)/yNumOfDivs]
 
         global vectorRects
         vectorRects = np.zeros((size,size,2), np.float32)
