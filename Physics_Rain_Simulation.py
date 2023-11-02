@@ -13,6 +13,11 @@ import re
 import numpy
 # import pyautogui
 
+xNumOfDivs = 2.4
+yNumOfDivs = 1.75 
+minCumulitiveFactor = 3.5
+maxColorVal = 1/math.sqrt((.5/yNumOfDivs) + (.5/xNumOfDivs)) # This just adjusts the formula so that the max color value is correctly calculated
+
 def update(cvs, wind):
         global drops 
 
@@ -28,7 +33,7 @@ def update(cvs, wind):
             else:
                 global vectorRects
                 currentRect = vectorRects[math.floor((dropCoor[0]/(600/size))),math.floor((dropCoor[1]/(600/size)))]
-                drops[dropNum, 2] += .25 - currentRect[1] # Positive is down in tkinter so to simulate pyhsics we subtract instead of add
+                drops[dropNum, 2] += .2 - currentRect[1] # Positive is down in tkinter so to simulate pyhsics we subtract instead of add
                 drops[dropNum, 1] += .0 + currentRect[0]
                 cvs.tick(drops[dropNum])
                 dropNum += 1
@@ -38,7 +43,7 @@ def getColor(xcomp, ycomp):
 
     vectorAngle = getVectorAngle(xcomp, ycomp)
     
-    rgb = hls_to_rgb(vectorAngle/360, .75, totalVector*1.78)
+    rgb = hls_to_rgb(vectorAngle/360, .75, totalVector*maxColorVal) # This makes sure that no matter what the max and min values are they show up as intended
     
     return '#{:02x}{:02x}{:02x}'.format(abs(int(rgb[0]*255)), abs(int(rgb[1]*255)), abs(int(rgb[2]*255)))
 
@@ -80,7 +85,7 @@ class RaindropCanvas(Canvas):
         
     def addRandomDrop(self, dropsList):
         x_coor = random.randint(0,596)
-        size = random.random()*4.3 # This changes the size of the drop
+        size = random.random()*4.3 # This changes the size of the drop 4.3
         drop = self.create_oval(x_coor, 1, x_coor+size, size, fill="#190482", outline="#190482") # blue color #190482
         global drops
         drops = np.append(dropsList, [[float(drop),0.0,0.0]], axis=0)
@@ -89,13 +94,6 @@ class RaindropCanvas(Canvas):
     def getVectorRects(self):
         global size
         size = 16
-        
-        global xNumOfDivs
-        xNumOfDivs = 3
-        global yNumOfDivs
-        yNumOfDivs = 2
-        global minCumulitiveFactor
-        minCumulitiveFactor = 3
         
         baseVector = [(random.random()-.5)/xNumOfDivs, (random.random()-.5)/yNumOfDivs]
 
@@ -153,7 +151,6 @@ def main():
     root.update()
 
     while True:
-        update(cvs, wind)
         update(cvs, wind)
         root.update_idletasks()
         if i%20 == 0:
