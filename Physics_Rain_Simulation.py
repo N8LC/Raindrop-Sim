@@ -13,12 +13,14 @@ import numpy
 # import pyautogui
 global root
 root = Tk()
-root.geometry('700x600')
+root.geometry('750x600')
 
-xNumOfDivs = 2.75 # Increasing this decreases the amount of variation in the x vector components
-yNumOfDivs = 1.75 # Increasing this decreases the amount of variation in the y vector components
-minCumulitiveFactor = 3.5
-maxColorVal = 1/math.sqrt((.5/yNumOfDivs) + (.5/xNumOfDivs)) # This just adjusts the formula so that the max color value is correctly calculated
+xNumOfDivs = 3.85 # Increasing this decreases the amount of variation in the x vector components
+yNumOfDivs = 1.975 # Increasing this decreases the amount of variation in the y vector components
+minCumulitiveFactor = 2.23
+maxColorVal = (1/math.sqrt((.5/yNumOfDivs)**2 + (.5/xNumOfDivs)**2))/1.65 # This just adjusts the formula so that the max color value is correctly calculated
+global generatedDrops
+generatedDrops = 1
 global x0
 x0 = 0
 
@@ -94,6 +96,53 @@ def stopRepeatDrop(e):
     root.after_cancel(repeat)
     repeat = None
 
+def changeToUser(canvas):
+    global generatedDrops
+    generatedDrops = 0
+    canvas.respawnVectorRects()
+    userScene(canvas)
+
+def changeToGenerated(canvas):
+    global generatedDrops
+    generatedDrops = 1
+    canvas.respawnVectorRects()
+    generatedScene(canvas)
+    
+
+# This function inherits vectors from other active squares
+def findVectorRect(vectorRects, xDirInt, yDirInt, xNumOfDivs, yNumOfDivs, baseVector):
+
+    base = 2.4
+
+    rand = random.random()
+
+    if (xDirInt == 0 and yDirInt == 0):                    
+        [xDirInt, yDirInt] = baseVector
+    elif (yDirInt == 0):
+        # This is the everage of the boxes to the left
+        horizontalBase = (vectorRects[xDirInt-1, yDirInt, 0]*base + vectorRects[xDirInt-1, yDirInt+1, 0])/(2+(base-1))
+        # This is the average of the bozes above
+        verticalBase = vectorRects[xDirInt-1, yDirInt+size-1, 1]
+        
+        [xDirInt, yDirInt] = [horizontalBase + (rand-.5)/(xNumOfDivs*minCumulitiveFactor), verticalBase + (rand-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square 
+    elif (xDirInt == 0):
+        # This is the average of the bozes above
+        verticalBase = vectorRects[xDirInt, yDirInt-1, 1]        
+
+        [xDirInt, yDirInt] = [baseVector[0] + (rand-.5)/(xNumOfDivs*minCumulitiveFactor), verticalBase + (rand-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square
+    else:
+        # This is the everage of the boxes to the left
+        if (yDirInt != 15):
+            horizontalBase = (vectorRects[xDirInt-1, yDirInt-1, 0] + vectorRects[xDirInt-1, yDirInt, 0]*base + vectorRects[xDirInt-1, yDirInt+1, 0])/(3+(base-1))
+        else:
+            horizontalBase = (vectorRects[xDirInt-1, yDirInt-1, 0] + vectorRects[xDirInt-1, yDirInt, 0]*base)/(2+(base-1))
+        # This is the average of the bozes above
+        verticalBase = (vectorRects[xDirInt-1, yDirInt-1, 1] + vectorRects[xDirInt, yDirInt-1, 1]*base)/(2+(base-1))
+        
+        [xDirInt, yDirInt] = [horizontalBase + (rand-.5)/(xNumOfDivs*minCumulitiveFactor), verticalBase + (rand-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square
+
+    return [xDirInt, yDirInt]
+
 class RaindropCanvas(Canvas):
  
     def __init__(self, *args, **kwargs):
@@ -134,27 +183,21 @@ class RaindropCanvas(Canvas):
         global size
         size = 16
 
+        # Starting Square Div
+        baseVector = [(random.random()-.5)/xNumOfDivs, (random.random()-.5)/yNumOfDivs]
+
         global vectorRectsObjects
         vectorRectsObjects = np.zeros((size**2, 2), np.int32)
-        
-        baseVector = [(random.random()-.5)/xNumOfDivs, (random.random()-.5)/yNumOfDivs]
 
         global vectorRects
         vectorRects = np.zeros((size,size,2), np.float32)
 
         for xDirInt in range(len(vectorRects)):
             for yDirInt in range(len(vectorRects[xDirInt])):
-                if (xDirInt == 0 and yDirInt == 0):                    
-                    vectorRects[xDirInt, yDirInt] = baseVector #Gives random vector components to each square
-                elif (yDirInt == 0):
-                    vectorRects[xDirInt, yDirInt] = [vectorRects[xDirInt-1, yDirInt, 0] + (random.random()-.5)/(xNumOfDivs*minCumulitiveFactor), vectorRects[xDirInt-1, yDirInt+size-1, 1] + (random.random()-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square INTENTIONAL BUG
-                    vectorRects[xDirInt, yDirInt] = doesNotExceedBounds(vectorRects[xDirInt, yDirInt, 0], vectorRects[xDirInt, yDirInt, 1])
-                elif (xDirInt == 0):
-                    vectorRects[xDirInt, yDirInt] = [baseVector[0] + (random.random()-.5)/(xNumOfDivs*minCumulitiveFactor), vectorRects[xDirInt, yDirInt-1, 1] + (random.random()-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square INTENTIONAL BUG
-                    vectorRects[xDirInt, yDirInt] = doesNotExceedBounds(vectorRects[xDirInt, yDirInt, 0], vectorRects[xDirInt, yDirInt, 1])
-                else:
-                    vectorRects[xDirInt, yDirInt] = [vectorRects[xDirInt-1, yDirInt, 0] + (random.random()-.5)/(xNumOfDivs*minCumulitiveFactor), vectorRects[xDirInt, yDirInt-1, 1] + (random.random()-0.5)/(yNumOfDivs*minCumulitiveFactor)] #Gives random vector components to each square INTENTIONAL BUG
-                    vectorRects[xDirInt, yDirInt] = doesNotExceedBounds(vectorRects[xDirInt, yDirInt, 0], vectorRects[xDirInt, yDirInt, 1])
+                
+                # This gets the inheritence from the other squares
+                vectorRects[xDirInt, yDirInt] = findVectorRect(vectorRects, xDirInt, yDirInt, xNumOfDivs, yNumOfDivs, baseVector)
+                vectorRects[xDirInt, yDirInt] = doesNotExceedBounds(vectorRects[xDirInt, yDirInt, 0], vectorRects[xDirInt, yDirInt, 1])
                 
                 # Create the Square
                 coordinates = [(xDirInt)*(600/size), (yDirInt)*(600/size), ((xDirInt)*(600/size))+(600/size), ((yDirInt)*(600/size))+(600/size)]
@@ -180,6 +223,11 @@ def userScene(cvs):
     root.bind('<Motion>',callback)
     root.bind('<ButtonRelease-1>', stopRepeatDrop)
     root.bind("<Button-1>", functools.partial(addDropBlur, canvas=cvs))
+
+def generatedScene(cvs):
+    root.unbind('<Motion>')
+    root.unbind('<ButtonRelease-1>')
+    root.unbind("<Button-1>")
     
   
 def main():    
@@ -193,12 +241,17 @@ def main():
     
     # Root binds
     root.bind("<e>", lambda _: cvs.respawnVectorRects())
-    userScene(cvs)
+    
+    userModeButton = Button(root, text="UserMode", command=functools.partial(changeToUser, canvas=cvs))
+    userModeButton.place(x=610, y=5)
+    
+    generatedModeButton = Button(root, text="GeneratedMode", command=functools.partial(changeToGenerated, canvas=cvs))
+    generatedModeButton.place(x=610, y=40)
 
     # Update loop
     i = 0
     while True:
-        update(cvs, 2, root) # 0 - No Objects, 1 - Some objects, 2 - A lot of objects
+        update(cvs, generatedDrops, root) # 0 - No Objects, 1 - Some objects, 2 - A lot of objects
         root.update_idletasks()
         if i%4 == 0:
             root.update()
