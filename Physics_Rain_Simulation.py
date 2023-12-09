@@ -7,6 +7,7 @@ import RaindropNeuralNetwork as RNN
 from RaindropCanvas import *
 import copy
 import multiprocessing as mp
+import time
 
 # This variable determines how fast the goalpost moves
 global goalPostChange
@@ -19,6 +20,18 @@ goingRight = True
 # Starting point for the goal
 global goal_x,goal_x2
 goal_x,goal_x2 = 250,350
+
+# Change from user to generated
+global generateDrops
+generateDrops = True
+
+# Default Neural Network
+global default_network
+default_network = None
+
+# For when it is time to run the default network
+global runningNetwork
+runningNetwork = False
 
 # Keeps track of all the scores of the neural networks
 scoreList = []
@@ -125,12 +138,18 @@ def getGoalValue(goalNum1,goalNum2,goal_x_start,goal_x_current):
         return (float(newDistanceX - oldDistanceX)/float(biggerValue))/2.0 + .5 
 
 
-def update(drops, score, neural_network, usableInput=None, usableReturn=False):
+def update(drops, score, neural_network=default_network, usableInput=None, usableReturn=False):
     # Update the goal
-    global vectorRects
-    global goal_x,goal_x2
+    global vectorRects, generateDrops
+    global goal_x, goal_x2
     global globalTickNum, tickNumCount
+    
+    # Moves Goal
     goal_x,goal_x2 = moveGoal(goal_x,goal_x2)
+    if (VISUALIZE): 
+        # This moves the goalpost on the screen
+        global goal
+        cvs.moveto(goal, goal_x, 600)
     
     # Gets right or left and converts it
     goalNum = getGoalNum()
@@ -145,24 +164,21 @@ def update(drops, score, neural_network, usableInput=None, usableReturn=False):
     #print(f"Coor: {NN_x_coor}")
 
     # This adds more drops
-    if (VISUALIZE):
-        drop,x_coor = addRandomDrop(False, VISUALIZE, cvs) # xcoor is the x coordinate at which the drop spawns
-        #drops = np.append(drops,[[0.0,0.0,x_coor,0.0,drop]], axis=0)
-        if neural_network != None:
-            drops = np.append(drops,[[0.0,0.0,NN_x_coor,0.0,(goal_x+goal_x2),NN_x_coor,goalNum,drop]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x (Used for neural network),goalNum, Drop Object
+    if (generateDrops or runningNetwork):
+        if (VISUALIZE):
+            drop,x_coor = addRandomDrop(False, VISUALIZE, cvs) # xcoor is the x coordinate at which the drop spawns
+            #drops = np.append(drops,[[0.0,0.0,x_coor,0.0,drop]], axis=0)
+            if neural_network != None:
+                drops = np.append(drops,[[0.0,0.0,NN_x_coor,0.0,(goal_x+goal_x2),NN_x_coor,goalNum,drop]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x (Used for neural network),goalNum, Drop Object
+            else:
+                drops = np.append(drops,[[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum,drop]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x, goalNum, Drop Object
         else:
-            drops = np.append(drops,[[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum,drop]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x, goalNum, Drop Object
-        
-        # This moves the goalpost on the screen
-        global goal
-        cvs.moveto(goal, goal_x, 600)
-    else:
-        if neural_network != None:
-            drops = np.append(drops,[[0.0,0.0,NN_x_coor,0.0,(goal_x+goal_x2),NN_x_coor,goalNum]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x (Used for neural network), goalNum, Drop Object
-        else:
-            # Get the x coor if we are not doing visualize
-            x_coor = random.randint(0,596)
-            drops = np.append(drops,[[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x, goalNum, Drop Object
+            if neural_network != None:
+                drops = np.append(drops,[[0.0,0.0,NN_x_coor,0.0,(goal_x+goal_x2),NN_x_coor,goalNum]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x (Used for neural network), goalNum, Drop Object
+            else:
+                # Get the x coor if we are not doing visualize
+                x_coor = random.randint(0,596)
+                drops = np.append(drops,[[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum]], axis=0) # Current X Velocity, Current Y Velocity, Current X Position, Current Y Position, goal_x at drop time (Used for neural network), original drop x, goalNum, Drop Object
 
     # This changes the canvas
     limit = len(drops)
@@ -172,10 +188,10 @@ def update(drops, score, neural_network, usableInput=None, usableReturn=False):
             # Iterates Score
             if (goal_x < drops[dropNum,2] < goal_x2) and (drops[dropNum,3] > 600):
                 # The score gets lower the farther from the center of the goal
-                score += 1 - (abs((goal_x + goal_x2)/2 - drops[dropNum,2])/(goal_x2 - goal_x))
+                score += 1 - (abs((goal_x + goal_x2)/2 - drops[dropNum,2])/((goal_x2 - goal_x)*6))
                 #print(f"Score: {score} \nScore Remover: {(abs((goal_x + goal_x2)/2 - drops[dropNum,2])/(goal_x2 - goal_x))}")
                 diff = goal_x2-goal_x
-                if usableReturn and (goal_x+diff/3 < drops[dropNum,2] < goal_x2+diff/3): 
+                if usableReturn and (goal_x+diff/4 < drops[dropNum,2] < goal_x2+diff/4): 
                     # If the goal changed directions, calculate a new value rather than 0 or 1
                     goalScoreNum = getGoalValue(drops[dropNum, 6],goalNum,drops[dropNum, 4]/2,(goal_x+goal_x2)/2)
                     if (goalScoreNum != 0 and goalScoreNum != 1):
@@ -244,7 +260,6 @@ def doesNotExceedBounds(xcomp, ycomp):
 
 # This function inherits vectors from other active squares
 def findVectorRect(vectorRects, xDirInt, yDirInt, xNumOfDivs, yNumOfDivs, baseVector):
-
     base = 2.4
     global size
 
@@ -294,11 +309,14 @@ def getVectorRects():
     
 # User Commands for the Visual
 def addDropBlur(e):
-    global repeat
-    global drops
-    drop,x_coor = addRandomDrop(cvs, True)
-    drops = np.append(drops, [[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,drop]], axis=0)
-    repeat = root.after(2, addDropBlur, e)
+    global repeat, drops
+    
+    # Gets right or left and converts it
+    goalNum = getGoalNum()
+    
+    drop,x_coor = addRandomDrop(True, True, cvs)
+    drops = np.append(drops, [[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum,drop]], axis=0)
+    repeat = root.after(1, addDropBlur, e)
     
 def userScene(cvs):
     root.bind('<Motion>',callback)
@@ -311,15 +329,22 @@ def stopRepeatDrop(e):
     repeat = None
 
 def changeToUser(canvas):
-    global generatedDrops
-    generatedDrops = 0
-    respawnVectorRects()
+    global generateDrops,runningNetwork
+    generateDrops = False
+    runningNetwork = False
     userScene(canvas)
 
 def changeToGenerated(canvas):
-    global generatedDrops
-    generatedDrops = 1
-    respawnVectorRects()
+    global generateDrops,runningNetwork
+    generateDrops = True
+    runningNetwork = False
+    generatedScene(canvas)
+    
+def changeToNeuralNetwork(canvas):
+    global generateDrops,runningNetwork
+    generateDrops = False
+    runningNetwork = True
+    userScene(canvas)
     generatedScene(canvas)
     
 def respawnVectorRects():
@@ -327,6 +352,9 @@ def respawnVectorRects():
     global cvs
     global vectorRects
     global drops
+    
+    # Gets right or left and converts it
+    goalNum = getGoalNum()
     
     for objectAndText in vectorRectsObjects:
         cvs.delete(objectAndText[0])
@@ -340,13 +368,13 @@ def respawnVectorRects():
         cvs.delete(int(drops[counter-1, 7]))
         np.delete(drops, counter-1, axis=0)
         counter -= 1
-        drops = np.array([[0.0, 0.0, 0.0, 0.0, (goal_x+goal_x2), 0.0, cvs.create_oval(0, 0, 2, 2, fill="#190482")], [0.0, 0.0, 50.0, 0.0, (goal_x+goal_x2), 50.0, cvs.create_oval(50, 50, 52, 52, fill="#190482")]], np.float32)
+    drops = np.array([[0.0, 0.0, 0.0, 0.0, (goal_x+goal_x2), 0.0,goalNum, cvs.create_oval(0, 0, 2, 2, fill="#190482")], [0.0, 0.0, 50.0, 0.0, (goal_x+goal_x2), 50.0, goalNum, cvs.create_oval(50, 50, 52, 52, fill="#190482")]], np.float32)
     vectorRectsObjects = getVectorRectVisuals(cvs, vectorRects)
     
 def initializeNeuralNetwork(alpha=0.5):
     return RNN.RaindropNueralNetwork([2,3,3,1], alpha=alpha)
   
-def main(vectorRectsInput, visualize, simple_network=None, usableInputReturn=False, numOfTicks=800): 
+def main(vectorRectsInput, visualize, simple_network=default_network, usableInputReturn=False, numOfTicks=800): 
     global vectorRects
     vectorRects = vectorRectsInput
     global drops
@@ -384,6 +412,9 @@ def main(vectorRectsInput, visualize, simple_network=None, usableInputReturn=Fal
     
         generatedModeButton = Button(root, text="GeneratedMode", command=functools.partial(changeToGenerated, canvas=cvs))
         generatedModeButton.place(x=610, y=40)
+        
+        neuralNetworkButton = Button(root, text="NeuralNetwork", command=functools.partial(changeToNeuralNetwork, canvas=cvs))
+        neuralNetworkButton.place(x=610, y=75)
     
         # Goal
         global goal
@@ -403,13 +434,25 @@ def main(vectorRectsInput, visualize, simple_network=None, usableInputReturn=Fal
     i = 0
     while i<numOfTicks:
         # Updates the function
-        if usableInputReturn:
-            drops,usableInput = update(drops, score, simple_network, usableInput=usableInput, usableReturn=usableInputReturn)
+        if runningNetwork and usableInputReturn:
+            drops,usableInput = update(drops, score, neural_network=simple_network, usableInput=usableInput, usableReturn=usableInputReturn)
+        elif runningNetwork:
+            drops,score = update(drops, score, neural_network=simple_network)
+        elif usableInputReturn:
+            drops,usableInput = update(drops, score, usableInput=usableInput, usableReturn=usableInputReturn)
         else:
-            drops,score = update(drops, score, simple_network)
+            drops,score = update(drops, score)
         if(not VISUALIZE):
             i += 1
             continue
+        
+        if (not generateDrops):
+            if (len(drops) < 2):
+                time.sleep(.01)
+            elif ((len(drops) < 15)):
+                time.sleep(.007)
+            elif (len(drops) < 35):
+                time.sleep(.004)
         
         # Does the required visual updates
         root.update_idletasks()
@@ -421,25 +464,32 @@ def main(vectorRectsInput, visualize, simple_network=None, usableInputReturn=Fal
     if usableInputReturn: return usableInput
     return score
 
-def runRandom(simple_network, usableInput, usableOutput, vectorRects):
+def runRandom(simple_network, usableInput, usableOutput, vectorRects, epoch):
     # Gets Scorelist
-    global scoreList
+    global scoreList, runningNetwork
+    
+    # For some reason need to reup this - not sure why
+    runningNetwork = True
     
     new_network = copy.deepcopy(simple_network)
-    new_network.randomizeNodes(usableInput,usableOutput,epochs=1,rand=(random.random()-.5)/10)
+    new_network.randomizeNodes(usableInput,usableOutput,epochs=2,rand=1/((epoch+2)/2.5))
     return [new_network,main(vectorRects,False,simple_network=new_network)]
 
 def networkInputs(vectorRects,usableInput,usableOutput):
     # Used to know when to show the network running
-    numIter = 1
+    epoch = 1
+    
+    # Makes sure to run network
+    global runningNetwork
+    runningNetwork = True
     
     global scoreList
     
     # How many different neural networks we want at a given time
-    length = 14
+    length = 16
     simple_network = initializeNeuralNetwork(.5)
     simple_network.fit(usableInput,usableOutput, epochs=5000)
-    main(vectorRects,True,simple_network)
+    main(vectorRects,True,simple_network=simple_network)
     
     # This is when the third part of training start
     for i in range(length):
@@ -449,27 +499,32 @@ def networkInputs(vectorRects,usableInput,usableOutput):
     scoreList = sorted(scoreList,key=lambda l:l[1], reverse=True)
 
     # Run Mainloop
-    while True:
+    while (epoch <= 150):
         # Removes the bad networks from the list
         scoreList = scoreList[0:length]        
 
         # Print out current state of networks
+        print(f"Epoch Number: {epoch}")
         print("\n")
         for net in scoreList:
-            print(net)
+            print(net)  
 
-        pool = mp.Pool(processes=14)
-        newScoreList = [pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput, vectorRects)) for x in range(0,length)]
-        scoreList = scoreList + newScoreList
+        pool = mp.Pool(processes=mp.cpu_count())
+        best = [pool.apply(runRandom, args=(scoreList[0][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,3)]
+        topThree = [pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,3)]
+        newScoreList = [pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,length)]
+        scoreList = scoreList + newScoreList + topThree + best
         
         # Sort the scorelist
         scoreList = sorted(scoreList,key=lambda l:l[1], reverse=True)
     
-        if (numIter % 10 == 0):
+        if (epoch % 10 == 0):
             main(vectorRects,True,scoreList[0][0])
-        numIter += 1
+        epoch += 1
+        
+    return scoreList[0][0]
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     # Initialize the board
     vectorRects = getVectorRects()
     
@@ -477,7 +532,11 @@ if __name__ == "__main__":
     main(vectorRects, True, usableInputReturn=False, numOfTicks=150)
     
     # Get usable input
-    usableInput = main(vectorRects, False, usableInputReturn=True, numOfTicks=2000)[0:3, 1:]
+    usableInput = main(vectorRects, False, usableInputReturn=True, numOfTicks=2500)[0:3, 1:]
+    
+    # Make sure that no generated 
+    generateDrops = False
+    
     usableInput = np.reshape(usableInput, (3,int(usableInput.size/3),1))
     bigUsableInput = np.empty((1,2), np.float16)
     for goodInput,goodInput2 in zip(usableInput[0],usableInput[1]):
@@ -487,5 +546,8 @@ if __name__ == "__main__":
     bigUsableInput = bigUsableInput[1:]
 
     # Runs the network function
-    networkInputs(vectorRects,bigUsableInput,usableInput[2])
+    default_network = networkInputs(vectorRects,bigUsableInput,usableInput[2])
+
+    # Runs the trained network indefinetly
+    main(vectorRects,True,simple_network=default_network,numOfTicks=1000000)
 

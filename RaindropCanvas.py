@@ -15,8 +15,6 @@ maxColorVal = (1/math.sqrt((.5/yNumOfDivs)**2 + (.5/xNumOfDivs)**2))/1.65 # This
 global size
 size = 15
 
-global generatedDrops
-generatedDrops = 2
 
 global x0
 x0 = 0
