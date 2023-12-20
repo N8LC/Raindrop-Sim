@@ -8,14 +8,11 @@ from RaindropCanvas import *
 import copy
 import multiprocessing as mp
 import time
+import threading as th
 
 # This variable determines how fast the goalpost moves
 global goalPostChange
 goalPostChange = 2
-
-# Starting direction of goal (True = right, False = left)
-global goingRight
-goingRight = True
 
 # Starting point for the goal
 global goal_x,goal_x2
@@ -27,20 +24,40 @@ generateDrops = True
 
 # Default Neural Network
 global default_network
-default_network = None
+default_network = RNN.RaindropNueralNetwork([2,3,3,1], alpha=.5)
+default_network.W = [np.array([[-6.61760619, -2.11310018, -3.85155274,  1.58702452],[-1.1445116 , -0.56500305, -2.09672162,  1.7655994 ],[ 1.55662052, -1.71109883,  1.62429721, -1.10557543]]), 
+       np.array([[ 3.47943931, -3.42554463, -1.04431427, -2.70289955],[ 0.52080882,  0.53738605,  0.97461208, -0.12834524],[ 3.07125882, -1.34274022,  0.07357841, -0.33383239],[-2.89892101, -0.20836237, -1.60680123, -1.49391823]]), 
+       np.array([[-2.46899092],[ 2.69640724],[-0.03611722],[ 1.23841474]])]
 
 # For when it is time to run the default network
 global runningNetwork
 runningNetwork = False
 
-# Keeps track of all the scores of the neural networks
-scoreList = []
+# Amount of ticks to keep the past score
+global scoreTickNum
+scoreTickNum = 800
 
 # This gets the average tick amount to fall to the bottom
 globalTickNum = 0
 tickNumCount = 0
 
-def getGoalNum():
+# Deletes old scores from the array
+def updateScore(curtick,scoreNumList):
+    global scoreTickNum
+    badScoresLeft = True
+    
+    while badScoresLeft:
+        if (len(scoreNumList) >= 1):
+            if curtick - scoreNumList[0,1] > scoreTickNum:
+                scoreNumList = np.delete(scoreNumList,0,0)
+            else:
+                badScoresLeft = False
+        else:
+            badScoresLeft = False
+    
+    return scoreNumList
+
+def getGoalNum(goingRight):
     if goingRight: return 1 
     else: return 0
     
@@ -138,21 +155,27 @@ def getGoalValue(goalNum1,goalNum2,goal_x_start,goal_x_current):
         return (float(newDistanceX - oldDistanceX)/float(biggerValue))/2.0 + .5 
 
 
-def update(drops, score, neural_network=default_network, usableInput=None, usableReturn=False):
+def update(drops, score, curtick, goingRight, neural_network=None, usableInput=None, usableReturn=False):
     # Update the goal
     global vectorRects, generateDrops
     global goal_x, goal_x2
     global globalTickNum, tickNumCount
+    global scoreNumList, scoreLabel
+    
+    scoreNumList = updateScore(curtick,scoreNumList)
     
     # Moves Goal
-    goal_x,goal_x2 = moveGoal(goal_x,goal_x2)
+    goal_x,goal_x2,goingRight = moveGoal(goal_x,goal_x2,goingRight)
     if (VISUALIZE): 
         # This moves the goalpost on the screen
         global goal
         cvs.moveto(goal, goal_x, 600)
+        
+        # Updates the score on the screen 
+        scoreLabel['text'] = str(math.trunc((np.sum(scoreNumList, axis=0)[0]*100))/100)
     
     # Gets right or left and converts it
-    goalNum = getGoalNum()
+    goalNum = getGoalNum(goingRight)
 
     # Gets x_coor from network
     if neural_network != None: 
@@ -188,7 +211,12 @@ def update(drops, score, neural_network=default_network, usableInput=None, usabl
             # Iterates Score
             if (goal_x < drops[dropNum,2] < goal_x2) and (drops[dropNum,3] > 600):
                 # The score gets lower the farther from the center of the goal
-                score += 1 - (abs((goal_x + goal_x2)/2 - drops[dropNum,2])/((goal_x2 - goal_x)*6))
+                dropScore = 1 - (abs((goal_x + goal_x2)/2 - drops[dropNum,2])/((goal_x2 - goal_x)*6))
+                score += dropScore
+                
+                # Updates the current score to screen
+                scoreNumList = np.append(scoreNumList,np.array([[dropScore,curtick]]),axis=0)
+                    
                 #print(f"Score: {score} \nScore Remover: {(abs((goal_x + goal_x2)/2 - drops[dropNum,2])/(goal_x2 - goal_x))}")
                 diff = goal_x2-goal_x
                 if usableReturn and (goal_x+diff/4 < drops[dropNum,2] < goal_x2+diff/4): 
@@ -221,11 +249,10 @@ def update(drops, score, neural_network=default_network, usableInput=None, usabl
                 # Deletes drop from canvas
                 cvs.tick(drops[dropNum])
             dropNum += 1
-    if usableReturn: return drops,usableInput
-    return drops,score
+    if usableReturn: return drops,usableInput,goingRight
+    return drops,score,goingRight
 
-def moveGoal(current_x1, current_x2):
-    global goingRight
+def moveGoal(current_x1, current_x2, goingRight):
     # Changes direction if the post gets too close to the edges
     if current_x2 >= 600:
         goingRight = False
@@ -234,9 +261,9 @@ def moveGoal(current_x1, current_x2):
     
     # This maintains current direction
     if goingRight:
-        return current_x1+goalPostChange, current_x2+goalPostChange
+        return current_x1+goalPostChange, current_x2+goalPostChange, goingRight
     else:
-        return current_x1-goalPostChange, current_x2-goalPostChange
+        return current_x1-goalPostChange, current_x2-goalPostChange, goingRight
     
 
 def compTick(drops, dropNum):
@@ -311,12 +338,14 @@ def getVectorRects():
 def addDropBlur(e):
     global repeat, drops
     
-    # Gets right or left and converts it
-    goalNum = getGoalNum()
+    # Gets right or left and converts it # NEEDS TO BE FIXED
+    goalNum = 1
     
     drop,x_coor = addRandomDrop(True, True, cvs)
-    drops = np.append(drops, [[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum,drop]], axis=0)
-    repeat = root.after(1, addDropBlur, e)
+    for i in range(4):
+         drops = np.append(drops, [[0.0,0.0,x_coor,0.0,(goal_x+goal_x2),x_coor,goalNum,drop]], axis=0)
+    repeat = root.after(4, addDropBlur, e)
+    
     
 def userScene(cvs):
     root.bind('<Motion>',callback)
@@ -354,7 +383,7 @@ def respawnVectorRects():
     global drops
     
     # Gets right or left and converts it
-    goalNum = getGoalNum()
+    goalNum = 1
     
     for objectAndText in vectorRectsObjects:
         cvs.delete(objectAndText[0])
@@ -374,15 +403,19 @@ def respawnVectorRects():
 def initializeNeuralNetwork(alpha=0.5):
     return RNN.RaindropNueralNetwork([2,3,3,1], alpha=alpha)
   
-def main(vectorRectsInput, visualize, simple_network=default_network, usableInputReturn=False, numOfTicks=800): 
+def main(vectorRectsInput, visualize, simple_network=default_network, usableInputReturn=False, numOfTicks=scoreTickNum): 
     global vectorRects
-    vectorRects = vectorRectsInput
     global drops
+    vectorRects = vectorRectsInput
+    #global drops
     score = 0
     
     # Starting direction of goal (True = right, False = left)
-    global goingRight
     goingRight = True
+    
+    # This is a list of drops that scored and the tick number that they scored on
+    global scoreNumList
+    scoreNumList = np.zeros((1,2))
 
     # Starting point for the goal
     global goal_x,goal_x2
@@ -400,7 +433,6 @@ def main(vectorRectsInput, visualize, simple_network=default_network, usableInpu
     VISUALIZE = visualize
     
     if(VISUALIZE):
-    
         # Tkinter stuff
         global vectorRectsObjects
         global cvs
@@ -415,6 +447,11 @@ def main(vectorRectsInput, visualize, simple_network=default_network, usableInpu
         
         neuralNetworkButton = Button(root, text="NeuralNetwork", command=functools.partial(changeToNeuralNetwork, canvas=cvs))
         neuralNetworkButton.place(x=610, y=75)
+
+        global scoreLabel
+        scoreLabel = Label(root, text="0")
+        scoreLabel.place(x=610, y=110)
+        #scoreLabel.pack()
     
         # Goal
         global goal
@@ -431,19 +468,19 @@ def main(vectorRectsInput, visualize, simple_network=default_network, usableInpu
 
 
     # Update loop
-    i = 0
-    while i<numOfTicks:
+    curtick = 0
+    while curtick<numOfTicks:
         # Updates the function
         if runningNetwork and usableInputReturn:
-            drops,usableInput = update(drops, score, neural_network=simple_network, usableInput=usableInput, usableReturn=usableInputReturn)
+            drops,usableInput,goingRight = update(drops, score, curtick, goingRight, neural_network=simple_network, usableInput=usableInput, usableReturn=usableInputReturn)
         elif runningNetwork:
-            drops,score = update(drops, score, neural_network=simple_network)
+            drops,score,goingRight = update(drops, score, curtick, goingRight, neural_network=simple_network)
         elif usableInputReturn:
-            drops,usableInput = update(drops, score, usableInput=usableInput, usableReturn=usableInputReturn)
+            drops,usableInput,goingRight = update(drops, score, curtick, goingRight, usableInput=usableInput, usableReturn=usableInputReturn)
         else:
-            drops,score = update(drops, score)
+            drops,score,goingRight = update(drops, score, curtick, goingRight)
         if(not VISUALIZE):
-            i += 1
+            curtick += 1
             continue
         
         if (not generateDrops):
@@ -456,24 +493,28 @@ def main(vectorRectsInput, visualize, simple_network=default_network, usableInpu
         
         # Does the required visual updates
         root.update_idletasks()
-        if i%4 == 0:
+        if curtick%4 == 0:
             root.update()
-        i += 1
+        curtick += 1
     if VISUALIZE: root.destroy()
     # This is for the section of the neural network in which we gather data
     if usableInputReturn: return usableInput
-    return score
+    return np.sum(scoreNumList, axis=0)[0]
 
-def runRandom(simple_network, usableInput, usableOutput, vectorRects, epoch):
+def runRandom(simple_network, usableInput, usableOutput, vectorRects, epoch, networks, x):
     # Gets Scorelist
-    global scoreList, runningNetwork
+    global runningNetwork, generateDrops
     
     # For some reason need to reup this - not sure why
     runningNetwork = True
+    generateDrops = False
     
     new_network = copy.deepcopy(simple_network)
-    new_network.randomizeNodes(usableInput,usableOutput,epochs=2,rand=1/((epoch+2)/2.5))
-    return [new_network,main(vectorRects,False,simple_network=new_network)]
+    new_network.randomizeNodes(usableInput,usableOutput,epochs=1,rand=1/((epoch+1)/5))
+    #networkScore = main(vectorRects,False,new_network)
+    #scoreList.append([new_network,networkScore])
+    networks[x] = new_network
+    return networks
 
 def networkInputs(vectorRects,usableInput,usableOutput):
     # Used to know when to show the network running
@@ -484,12 +525,25 @@ def networkInputs(vectorRects,usableInput,usableOutput):
     runningNetwork = True
     
     global scoreList
+    # Keeps track of all the scores of the neural networks
+    scoreList = []
     
     # How many different neural networks we want at a given time
     length = 16
-    simple_network = initializeNeuralNetwork(.5)
-    simple_network.fit(usableInput,usableOutput, epochs=5000)
+    simple_network = initializeNeuralNetwork(.4)
+    print(simple_network.W);
+    for i in range(10):
+        simple_network.fit(usableInput,usableOutput, epochs=10)
+        #print(f"Epoch - {(i+1)*10}, Score - {main(vectorRects,False,simple_network=simple_network)}")
+        print(main(vectorRects,False,simple_network=simple_network))
+    for i in range(50):
+        simple_network.fit(usableInput,usableOutput, epochs=100)
+        #print(f"Epoch - {(i+2)*100}, Score - {main(vectorRects,False,simple_network=simple_network)}")
+        print(main(vectorRects,False,simple_network=simple_network))
     main(vectorRects,True,simple_network=simple_network)
+    
+    #printvector = np.array_repr(simple_network.W).replace('\n', '')
+    print(simple_network.W)
     
     # This is when the third part of training start
     for i in range(length):
@@ -497,43 +551,53 @@ def networkInputs(vectorRects,usableInput,usableOutput):
 
     # Sort the scorelist
     scoreList = sorted(scoreList,key=lambda l:l[1], reverse=True)
+    
+    # Adds some epochs
+    adjustedScore = scoreList[0][1] - 380
+    
+    if (adjustedScore > 0):
+        epoch += int(adjustedScore/3)
+        
+    maxEpochNum = epoch+200
 
     # Run Mainloop
-    while (epoch <= 150):
-        # Removes the bad networks from the list
-        scoreList = scoreList[0:length]        
+    while (epoch <= maxEpochNum):
+        # Fix does not work
+        pool = mp.Pool(processes=4)
+        networks = [None] * length
+        for x in range(0,length):
+            networks = pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput,vectorRects,epoch,networks,x))
 
+        for i,value in enumerate(networks):
+            scoreList.append([value,main(vectorRects,False,value)])   
+            
+        print(scoreList)
+            
+        # Sort the scorelist
+        scoreList = sorted(scoreList,key=lambda l:l[1], reverse=True)
+        
+        # Removes the bad networks from the list
+        scoreList = scoreList[0:length]  
+        
         # Print out current state of networks
-        print(f"Epoch Number: {epoch}")
+        print(f"\nEpoch Number: {epoch}")
         print("\n")
         for net in scoreList:
             print(net)  
-
-        pool = mp.Pool(processes=mp.cpu_count())
-        best = [pool.apply(runRandom, args=(scoreList[0][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,3)]
-        topThree = [pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,3)]
-        newScoreList = [pool.apply(runRandom, args=(scoreList[x][0],usableInput,usableOutput,vectorRects,epoch)) for x in range(0,length)]
-        scoreList = scoreList + newScoreList + topThree + best
-        
-        # Sort the scorelist
-        scoreList = sorted(scoreList,key=lambda l:l[1], reverse=True)
     
         if (epoch % 10 == 0):
-            main(vectorRects,True,scoreList[0][0])
+            print(main(vectorRects,False,scoreList[0][0]))
+            print(main(vectorRects,True,scoreList[0][0]))
         epoch += 1
+        
+    print(scoreList[0][0].W)
         
     return scoreList[0][0]
 
-if __name__ == "__main__":    
-    # Initialize the board
-    vectorRects = getVectorRects()
-    
-    # Run the main application to show the user the board setup
-    main(vectorRects, True, usableInputReturn=False, numOfTicks=150)
-    
+def trainNewNetwork(vectorRects):
     # Get usable input
     usableInput = main(vectorRects, False, usableInputReturn=True, numOfTicks=2500)[0:3, 1:]
-    
+
     # Make sure that no generated 
     generateDrops = False
     
@@ -546,8 +610,30 @@ if __name__ == "__main__":
     bigUsableInput = bigUsableInput[1:]
 
     # Runs the network function
-    default_network = networkInputs(vectorRects,bigUsableInput,usableInput[2])
+    new_network = networkInputs(vectorRects,bigUsableInput,usableInput[2])
+    
+    return new_network
+    
 
+if __name__ == "__main__":    
+    # Initialize the board with set board
+    # The data present is the default array for the vector rects
+    vectorRects = np.array([[[-0.00786831, -0.09884162],        [-0.00873844, -0.10053781],        [ 0.01332159, -0.05923093],        [-0.0117655 , -0.06682798],        [-0.00694016, -0.06501867],        [-0.04253722, -0.13260111],        [ 0.02559236, -0.06737399],        [-0.02479084, -0.10036221],        [-0.02165457, -0.1272367 ],        [ 0.01598465, -0.08073852],        [ 0.04490769,  0.02214127],        [-0.00498738,  0.02775725],        [ 0.03546589,  0.11223152],        [-0.01297482,  0.10227705],        [-0.0078466 ,  0.10231937]],       [[-0.01663717,  0.08572452],        [ 0.03094651,  0.09864197],        [-0.052846  , -0.06803727],        [ 0.00268107, -0.05053785],        [-0.0337498 , -0.08968223],        [-0.01527273, -0.07523458],        [-0.00780774, -0.10471047],        [-0.05663672, -0.17951962],        [-0.00218093, -0.13356286],        [ 0.01876004, -0.12243037],        [ 0.03034475, -0.10363717],        [-0.00631324, -0.10925583],        [-0.00883816, -0.11593931],        [-0.05133557, -0.14734249],        [-0.06079391, -0.1741985 ]],       [[ 0.01338048, -0.14296485],        [ 0.0281988 , -0.02285494],        [-0.05159537, -0.04640648],        [-0.07245473, -0.15849487],        [-0.01217295, -0.10900791],        [-0.04364195, -0.15374716],        [-0.02343229, -0.13617283],        [ 0.00539762, -0.05175057],        [ 0.04215109,  0.01193801],        [ 0.0669399 ,  0.06720905],        [-0.01074327, -0.04728954],        [ 0.04907575,  0.02898885],        [ 0.03231163,  0.08625402],        [-0.06760605, -0.01956932],        [-0.09696806, -0.13308923]],       [[ 0.04660281, -0.0768227 ],        [-0.03317572, -0.17400081],        [-0.06642057, -0.18455628],        [-0.09779304, -0.22926626],        [ 0.01135684, -0.12193387],        [ 0.02603075, -0.00521006],        [-0.00388566, -0.01461298],        [ 0.04708269,  0.02738319],        [ 0.02842742, -0.01734312],        [ 0.10050675,  0.10210208],        [ 0.01497441,  0.08105394],        [-0.01382503, -0.04538162],        [-0.02644557, -0.10120712],        [-0.0975273 , -0.13565782],        [-0.09215241, -0.10896118]],       [[-0.00479146, -0.163407  ],        [ 0.0253904 , -0.04439035],        [-0.03618846, -0.02440714],        [-0.08508667, -0.1089972 ],        [-0.01250054, -0.14902079],        [-0.01085511, -0.19320293],        [ 0.03898596, -0.09017339],        [ 0.08358324,  0.03404913],        [ 0.00803207, -0.04786833],        [ 0.04470496, -0.07784054],        [ 0.02619748, -0.02817319],        [-0.04388966, -0.06182243],        [-0.05210791, -0.08111168],        [-0.11546668, -0.15586573],        [-0.07887836, -0.12096458]],       [[ 0.02297198, -0.084148  ],        [ 0.0017293 , -0.11293015],        [-0.04307983, -0.11182319],        [-0.0709125 , -0.11230408],        [-0.00578531, -0.06681161],        [ 0.02459761, -0.04323292],        [ 0.08340186,  0.00156434],        [ 0.01328029, -0.10923328],        [ 0.03302195, -0.06809647],        [-0.01133952, -0.1469513 ],        [ 0.00749455, -0.14023173],        [-0.0743747 , -0.19411014],        [-0.11571494, -0.25316456],        [-0.06017845, -0.13906407],        [-0.11982549, -0.20284906]],       [[-0.02495399, -0.25316456],        [ 0.00969164, -0.17749146],        [-0.01035443, -0.10223024],        [-0.04713789, -0.09989101],        [-0.06760138, -0.2086511 ],        [ 0.0153367 , -0.19757824],        [ 0.01537532, -0.22767222],        [ 0.01348007, -0.19967307],        [ 0.01416783, -0.18142661],        [-0.03371011, -0.21970072],        [-0.05704474, -0.25316456],        [-0.03429887, -0.15978242],        [-0.11925381, -0.21969745],        [-0.06995519, -0.19756849],        [-0.06743871, -0.11243849]],       [[-0.07246798, -0.22492453],        [ 0.02697522, -0.1753079 ],        [-0.00058374, -0.14948817],        [-0.10078067, -0.2473886 ],        [-0.01001685, -0.13756439],        [ 0.04822209, -0.05763893],        [-0.0321165 , -0.19051977],        [ 0.03452203, -0.16157283],        [-0.04167984, -0.25316456],        [-0.04676106, -0.25316456],        [-0.01517371, -0.18211566],        [-0.06296325, -0.21117423],        [-0.04043869, -0.10189882],        [-0.1132566 , -0.20022956],        [-0.08317954, -0.22868873]],       [[-0.09047168, -0.25316456],        [ 0.04544719, -0.15258324],        [-0.00043719, -0.12679991],        [-0.04310329, -0.10564141],        [-0.01619914, -0.14497355],        [-0.02378179, -0.22176127],        [ 0.04972726, -0.0790629 ],        [-0.04858321, -0.21056323],        [-0.02021956, -0.18582946],        [-0.00980249, -0.14983365],        [-0.08648561, -0.25316456],        [-0.06863409, -0.25316456],        [-0.10473825, -0.25316456],        [-0.12987013, -0.25316456],        [-0.11479698, -0.25316456]],       [[-0.07722109, -0.25316456],        [-0.00068844, -0.25316456],        [-0.04253451, -0.25316456],        [-0.07596944, -0.25316456],        [-0.00171786, -0.16626711],        [ 0.0420255 , -0.06764845],        [-0.02307064, -0.17876302],        [-0.06612562, -0.23975751],        [ 0.02500379, -0.13506302],        [-0.00401559, -0.10012484],        [-0.02175234, -0.03043862],        [-0.09764664, -0.12859794],        [-0.11593972, -0.1919321 ],        [-0.12987013, -0.25316456],        [-0.1066233 , -0.22858895]],       [[-0.01336603, -0.1479915 ],        [ 0.00450858, -0.11634759],        [-0.03172407, -0.13924082],        [-0.05105874, -0.17189692],        [ 0.04726596, -0.08679543],        [ 0.02810422, -0.08908711],        [ 0.02846867,  0.00792236],        [ 0.01752514,  0.05663216],        [ 0.03819337,  0.04840053],        [ 0.05627551,  0.10697152],        [-0.05051145,  0.01576477],        [-0.04138172,  0.08633699],        [-0.05897564,  0.13223192],        [-0.09654752,  0.08537663],        [-0.12987013, -0.0511715 ]],       [[ 0.02977946,  0.02268662],        [-0.00301556, -0.01820855],        [-0.04334812, -0.07721896],        [-0.04268627, -0.13126723],        [ 0.03213175, -0.12066831],        [ 0.07294293, -0.03194944],        [ 0.08270706,  0.06198577],        [ 0.07929196,  0.15248576],        [ 0.01001589,  0.070511  ],        [ 0.03016238,  0.0684256 ],        [ 0.00863807,  0.14371127],        [-0.00129505,  0.19606318],        [-0.1147488 ,  0.06391941],        [-0.12987013, -0.02478679],        [-0.0700334 ,  0.10515267]],       [[-0.03515653, -0.00262862],        [-0.03538249, -0.05493858],        [ 0.02166403,  0.06443483],        [-0.02704366,  0.02041112],        [ 0.05133967,  0.02830946],        [ 0.015363  , -0.11399693],        [ 0.02537898, -0.19577989],        [ 0.10987892, -0.03116234],        [ 0.05045873,  0.06207217],        [ 0.04760581,  0.11701956],        [-0.00556651,  0.06990193],        [-0.05771787,  0.02748533],        [-0.11625074,  0.03057423],        [-0.12987013,  0.00356267],        [-0.12987013, -0.10215539]],       [[ 0.01866028,  0.0028829 ],        [ 0.0248908 ,  0.09338276],        [ 0.02178227,  0.09684246],        [-0.00101482,  0.08174443],        [ 0.02193109,  0.05704292],        [-0.00993388, -0.02109749],        [-0.00507244, -0.14078107],        [ 0.04026055, -0.22890688],        [ 0.10897622, -0.08173611],        [ 0.08445533,  0.0546871 ],        [ 0.04207668,  0.16544193],        [-0.10406789,  0.04981599],        [-0.06719095,  0.11898532],        [-0.0870716 ,  0.1703782 ],        [-0.12471739,  0.13135938]],       [[-0.00394848,  0.08371439],        [-0.01459107, -0.0128867 ],        [ 0.0412368 ,  0.06501583],        [ 0.04474057,  0.14330478],        [-0.01606931,  0.07540536],        [ 0.01395749,  0.1003065 ],        [-0.02430027,  0.00918691],        [ 0.04315859, -0.03963138],        [ 0.10464744, -0.06243169],        [ 0.02624662, -0.17366794],        [ 0.05147594, -0.04220984],        [-0.02612703,  0.08971408],        [-0.12987013, -0.02128438],        [-0.06262556,  0.07549635],        [-0.0752822 ,  0.17818613]]])
+    
+    # # Run the main application to show the user the board setup
+    # main(vectorRects, True, usableInputReturn=False, numOfTicks=150)
+    
+    # # Get usable input and MAKE SURE DIRECTION INPUT FOR NEURAL NETWORK WORKS CORRECTLY
+    usableInput = main(vectorRects, False, usableInputReturn=True, numOfTicks=2500)[0:3, 1:]
+    
+    # Train a new neural network
+    #new_network = trainNewNetwork(vectorRects)
+    
     # Runs the trained network indefinetly
+
+    # Run with new network
+    # main(vectorRects,True,simple_network=new_network,numOfTicks=1000000)
+
+    # Run with default network
     main(vectorRects,True,simple_network=default_network,numOfTicks=1000000)
 
